@@ -1,62 +1,69 @@
 use std::{
-    net::{SocketAddr, TcpStream},
-    sync::{Arc, Mutex},
-    thread,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
+
+use tauri::{AppHandle, Emitter};
+use tokio::{net::TcpStream, sync::Semaphore, task::JoinSet, time::timeout};
+
+pub async fn verificar_porta(ip: IpAddr, porta: u16) -> bool {
+    let endereco = SocketAddr::new(ip, porta);
+
+    let resultado = timeout(Duration::from_millis(500), TcpStream::connect(endereco)).await;
+
+    matches!(resultado, Ok(Ok(_)))
+}
+
 #[tauri::command]
-pub fn port_scanner(ip: String) -> Vec<u16> {
-    let portas_abertas = Arc::new(Mutex::new(Vec::new()));
+pub async fn port_scanner(ip: String) -> Result<Vec<u16>, String> {
+    let ip: IpAddr = ip.parse().map_err(|_| format!("IP inválido: {ip}"))?;
+    
+    let limite_ficha = Arc::new(Semaphore::new(500));
+    let mut tarefas:JoinSet<(u16,bool)> = JoinSet::new();
 
-    let mut handles = Vec::new();
+    let mut portas_abertas:Vec<u16> = Vec::new();
 
-    let portas: Vec<u16> = (1..=u16::MAX).collect();
+    for porta in 1..=u16::MAX {
+        let limite_ficha = Arc::clone(&limite_ficha);
+        let permissao = limite_ficha.acquire_owned().await.unwrap();
 
-    for lote in portas.chunks(500) {
-        let lote = lote.to_vec();
+        tarefas.spawn(async move {
+            let _permissao = permissao;
+            let aberta = verificar_porta(ip, porta).await;
 
-        let ip_clone = ip.clone();
-
-        let portas_abertas_clone = Arc::clone(&portas_abertas);
-
-        let handle = thread::spawn(move || {
-            for porta_atual in lote {
-                let endereco_formatado =
-                    format!("{}:{}", ip_clone, porta_atual);
-
-                let ipv4_addr: SocketAddr =
-                    match endereco_formatado.parse() {
-                        Ok(endereco) => endereco,
-                        Err(_) => continue,
-                    };
-
-                let duracao = Duration::from_millis(500);
-
-                if TcpStream::connect_timeout(
-                    &ipv4_addr,
-                    duracao
-                )
-                .is_ok()
-                {
-                    portas_abertas_clone
-                        .lock()
-                        .unwrap()
-                        .push(porta_atual);
-                }
-            }
+            (porta, aberta)
         });
-
-        handles.push(handle);
     }
 
-    for handle in handles {
-        handle.join().unwrap();
+    while let Some(resultado) = tarefas.join_next().await {
+        if let Ok((porta, aberta)) = resultado {
+            if aberta {
+                portas_abertas.push(porta);
+                //app.emit("port-open", porta);
+            }
+        }
     }
 
-    let mut resultado =
-        portas_abertas.lock().unwrap().clone();
+    Ok(portas_abertas)
+}
 
-    resultado.sort();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
 
-    resultado
+    #[tokio::test]
+    async fn detecta_porta_aberta() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+
+        let endereco = listener.local_addr().unwrap();
+
+        let ip = endereco.ip();
+        let porta = endereco.port();
+
+        let aberta = verificar_porta(ip, porta).await;
+
+        assert!(aberta);
+    }
 }
