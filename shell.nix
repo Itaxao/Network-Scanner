@@ -12,7 +12,7 @@ pkgs.mkShell {
     nodejs
     glib
     gtk3
-    webkitgtk_6_0
+    webkitgtk_4_1
     librsvg
   ];
 }

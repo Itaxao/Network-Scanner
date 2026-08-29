@@ -1,46 +1,62 @@
-use clap::Parser;
-use std::net::SocketAddr;
-use std::net::TcpStream;
-use std::thread;
-use std::time::Duration;
-use std::vec;
+use std::{
+    net::{SocketAddr, TcpStream},
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
+#[tauri::command]
+pub fn port_scanner(ip: String) -> Vec<u16> {
+    let portas_abertas = Arc::new(Mutex::new(Vec::new()));
 
-#[derive(Parser)]
-struct Argumentos {
-    ip: String,
-}
+    let mut handles = Vec::new();
 
-pub fn port_scanner() {
-    let maquina = Argumentos::parse();
-
-    let portas: Vec<u16> = (1_u16..65535).collect();
+    let portas: Vec<u16> = (1..=u16::MAX).collect();
 
     for lote in portas.chunks(500) {
-        let mut vec_aux = vec![];
+        let lote = lote.to_vec();
 
-        for &porta_atual in lote {
-            let endereco_formatado = format!("{}:{}", maquina.ip, porta_atual);
-            let handle = thread::spawn(move || {
-                // Garante que não vai ter um endereço invalido
-                let ipv4_adrr: SocketAddr = match endereco_formatado.parse() {
-                    Ok(endereco_validado) => endereco_validado,
-                                       Err(_) => panic!("Endereço inexistente ou não acessivível"),
-                };
+        let ip_clone = ip.clone();
+
+        let portas_abertas_clone = Arc::clone(&portas_abertas);
+
+        let handle = thread::spawn(move || {
+            for porta_atual in lote {
+                let endereco_formatado =
+                    format!("{}:{}", ip_clone, porta_atual);
+
+                let ipv4_addr: SocketAddr =
+                    match endereco_formatado.parse() {
+                        Ok(endereco) => endereco,
+                        Err(_) => continue,
+                    };
+
                 let duracao = Duration::from_millis(500);
 
-                match TcpStream::connect_timeout(&ipv4_adrr, duracao) {
-                    Ok(_) => println!(
-                        "Endereço atual {} está com a porta:  {} aberta!",
-                        endereco_formatado, porta_atual
-                    ),
-                    Err(_) => {}
+                if TcpStream::connect_timeout(
+                    &ipv4_addr,
+                    duracao
+                )
+                .is_ok()
+                {
+                    portas_abertas_clone
+                        .lock()
+                        .unwrap()
+                        .push(porta_atual);
                 }
-            });
+            }
+        });
 
-            vec_aux.push(handle);
-        }
-        for i in vec_aux {
-            i.join().unwrap();
-        }
+        handles.push(handle);
     }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let mut resultado =
+        portas_abertas.lock().unwrap().clone();
+
+    resultado.sort();
+
+    resultado
 }

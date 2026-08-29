@@ -1,49 +1,55 @@
 import { useState } from "react";
-import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [ip, setIp] = useState("");
+  const [portas, setPortas] = useState([]);
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState("");
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  async function escanear() {
+    setCarregando(true);
+    setErro("");
+    setPortas([]);
+
+    try {
+      const resultado = await invoke("port_scanner", {
+        ip: ip,
+      });
+
+      setPortas(resultado);
+    } catch (erro) {
+      setErro(String(erro));
+    } finally {
+      setCarregando(false);
+    }
   }
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <h1>Network Scanner</h1>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+      <input
+        type="text"
+        value={ip}
+        onChange={(e) => setIp(e.target.value)}
+        placeholder="192.168.0.1"
+      />
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <button onClick={escanear} disabled={carregando}>
+        {carregando ? "Escaneando..." : "Escanear"}
+      </button>
+
+      {erro && <p>{erro}</p>}
+
+      <h2>Portas abertas</h2>
+
+      <ul>
+        {portas.map((porta) => (
+          <li key={porta}>{porta}</li>
+        ))}
+      </ul>
     </main>
   );
 }
