@@ -16,7 +16,7 @@ pub async fn verificar_porta(ip: IpAddr, porta: u16) -> bool {
 }
 
 #[tauri::command]
-pub async fn port_scanner(ip: String) -> Result<Vec<u16>, String> {
+pub async fn port_scanner(app: AppHandle, ip: String) -> Result<Vec<u16>, String> {
     let ip: IpAddr = ip.parse().map_err(|_| format!("IP inválido: {ip}"))?;
     
     let limite_ficha = Arc::new(Semaphore::new(500));
@@ -28,9 +28,16 @@ pub async fn port_scanner(ip: String) -> Result<Vec<u16>, String> {
         let limite_ficha = Arc::clone(&limite_ficha);
         let permissao = limite_ficha.acquire_owned().await.unwrap();
 
+        let app = app.clone();
         tarefas.spawn(async move {
             let _permissao = permissao;
             let aberta = verificar_porta(ip, porta).await;
+
+            if aberta {
+                println!("Porta {porta} aberta");
+
+                let _ = app.emit("port-open", porta);
+            }
 
             (porta, aberta)
         });
@@ -40,7 +47,6 @@ pub async fn port_scanner(ip: String) -> Result<Vec<u16>, String> {
         if let Ok((porta, aberta)) = resultado {
             if aberta {
                 portas_abertas.push(porta);
-                //app.emit("port-open", porta);
             }
         }
     }
